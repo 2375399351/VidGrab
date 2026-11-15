@@ -28,7 +28,6 @@ jobs:
       # ---------- 将源码中硬编码的 /root 路径替换为 $HOME ----------
       - name: Patch hardcoded /root paths
         run: |
-          # 用 $HOME 的实际绝对路径替换 Makefile 和 assemble.py 中的 /root
           sed -i '' "s#/root#$HOME#g" Makefile
           sed -i '' "s#/root#$HOME#g" assemble.py
 
@@ -47,25 +46,49 @@ jobs:
           cp -R "$XC_SRC" $HOME/pyios/Python.xcframework
           ls $HOME/pyios/Python.xcframework
 
-      # ---------- FFmpeg 静态库（full-gpl，含 lame）----------
-      - name: Download FFmpeg iOS static libs (full-gpl)
+      # ---------- FFmpeg（社区维护的 luthviar 镜像，含 libmp3lame）----------
+      - name: Download FFmpeg iOS libs (community full-gpl mirror)
         run: |
-          FF_TAG="6.0"
-          FF_URL="https://github.com/arthenica/ffmpeg-kit/releases/download/v${FF_TAG}.LTS/ffmpeg-kit-full-gpl-${FF_TAG}-ios-xcframework.zip"
+          FF_URL="https://github.com/luthviar/ffmpeg-kit-ios-full/releases/download/6.0/ffmpeg-kit-ios-full.zip"
           curl -L --fail -o ffmpeg-ios.zip "$FF_URL"
           unzip -q ffmpeg-ios.zip -d ffmpeg-ios-extracted
-          SLICE_DIR=$(find ffmpeg-ios-extracted -type d -name "ios-arm64" | head -n 1)
-          if [ -z "$SLICE_DIR" ]; then
-            echo "未找到 ios-arm64 切片"
-            exit 1
+
+          mkdir -p $HOME/ffmpeg-ios/include $HOME/ffmpeg-ios/lib
+
+          # 遍历每个 xcframework，提取 ios-arm64 切片下的头文件和静态库
+          found_mp3lame=0
+          while IFS= read -r -d '' xcf; do
+            slice="$xcf/ios-arm64"
+            [ -d "$slice" ] || continue
+
+            # 提取 Headers（可能在 slice/Headers 或 slice/*.framework/Headers）
+            if [ -d "$slice/Headers" ]; then
+              cp -R "$slice/Headers/." $HOME/ffmpeg-ios/include/
+            elif find "$slice" -maxdepth 2 -name Headers -type d | head -n 1 | grep -q .; then
+              HDR_DIR=$(find "$slice" -maxdepth 2 -name Headers -type d | head -n 1)
+              cp -R "$HDR_DIR/." $HOME/ffmpeg-ios/include/
+            fi
+
+            # 提取静态库：优先找 slice 下的 .a，其次找 .framework 内的同名二进制
+            find "$slice" -maxdepth 2 -name "*.a" -exec cp {} $HOME/ffmpeg-ios/lib/ \;
+            for fw in "$slice"/*.framework; do
+              [ -d "$fw" ] || continue
+              bin="$fw/$(basename "$fw" .framework)"
+              [ -f "$bin" ] && cp "$bin" $HOME/ffmpeg-ios/lib/
+            done
+
+            [ -f "$slice/libmp3lame.a" ] || find "$slice" -name "*mp3lame*" -exec cp {} $HOME/ffmpeg-ios/lib/ \; 2>/dev/null
+            [ -f "$HOME/ffmpeg-ios/lib/libmp3lame.a" ] && found_mp3lame=1
+          done < <(find ffmpeg-ios-extracted -name "*.xcframework" -type d -print0)
+
+          if [ "$found_mp3lame" -ne 1 ]; then
+            echo "警告：未找到 libmp3lame.a，Makefile 链接时可能失败"
           fi
-          mkdir -p $HOME/ffmpeg-ios
-          cp -R "$SLICE_DIR/Headers" $HOME/ffmpeg-ios/include 2>/dev/null || \
-            cp -R "$SLICE_DIR/include" $HOME/ffmpeg-ios/include
-          cp -R "$SLICE_DIR/lib" $HOME/ffmpeg-ios/lib 2>/dev/null || \
-            mkdir -p $HOME/ffmpeg-ios/lib && find "$SLICE_DIR" -name "*.a" -exec cp {} $HOME/ffmpeg-ios/lib/ \;
-          ls $HOME/ffmpeg-ios/include | head
-          ls $HOME/ffmpeg-ios/lib | head
+
+          echo "--- include 文件数 ---"
+          ls $HOME/ffmpeg-ios/include | wc -l
+          echo "--- lib 文件列表 ---"
+          ls $HOME/ffmpeg-ios/lib
 
       # ---------- app_packages ----------
       - name: Prepare app_packages
