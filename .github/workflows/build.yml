@@ -15,6 +15,30 @@ jobs:
         run: |
           brew install ldid dpkg make xz uv
 
+      # ---------- 修正文件名大小写不匹配 ----------
+      - name: Fix filename case sensitivity
+        run: |
+          # 把 Sources 下所有 .h 文件名改为与 .m 中 #import 引用一致的大小写
+          # 先处理已知的 VGConvert.h / vgconvert.h
+          if [ -f Sources/vgconvert.h ] && [ ! -f Sources/VGConvert.h ]; then
+            mv Sources/vgconvert.h Sources/VGConvert.h
+            echo "已重命名 Sources/vgconvert.h -> Sources/VGConvert.h"
+          fi
+          # 通用兜底：扫描 .m 文件中的 #import "XXX.h"，如果 XXX.h 在磁盘上存在但大小写不同，则修正
+          cd Sources
+          for m in *.m; do
+            [ -f "$m" ] || continue
+            grep -oE '#import "[^"]+\.h"' "$m" 2>/dev/null | sed 's/#import "//;s/"//' | while read -r h; do
+              [ -f "$h" ] && continue
+              actual=$(find . -maxdepth 1 -iname "$h" -type f | head -n 1)
+              if [ -n "$actual" ] && [ "$actual" != "./$h" ]; then
+                mv "$actual" "./$h"
+                echo "已重命名 $actual -> ./$h"
+              fi
+            done
+          done
+          cd ..
+
       # ---------- Theos ----------
       - name: Install Theos manually
         run: |
@@ -98,9 +122,9 @@ jobs:
           mkdir -p $HOME/theos/toolchain/linux/iphone/bin
           ln -sf $(which ldid) $HOME/theos/toolchain/linux/iphone/bin/ldid
 
-      # ---------- 构建（修复文件名大小写警告）----------
+      # ---------- 构建（已修正大小写，无需再传警告抑制标志）----------
       - name: Build app
-        run: make FINALPACKAGE=1 ADDITIONAL_CFLAGS="-Wno-error=nonportable-include-path"
+        run: make FINALPACKAGE=1
 
       - name: Assemble IPA
         run: python3 assemble.py
