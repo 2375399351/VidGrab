@@ -8,6 +8,7 @@ NSString *const VGSubtitleModelDidChange = @"VGSubtitleModelDidChange";
 static NSString *const kEnabledKey = @"vgSubsEnabled";
 static NSString *const kQualityKey = @"vgSubsQuality";
 static NSString *const kStartOnKey = @"vgSubsStartOn";
+static NSString *const kLanguageKey = @"vgSubsLanguage";
 
 static NSString *const kModelBase = @"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/";
 
@@ -164,6 +165,14 @@ static void PostModelChange(void) {
 
 + (BOOL)startOn { return [NSUserDefaults.standardUserDefaults boolForKey:kStartOnKey]; }
 + (void)setStartOn:(BOOL)on { [NSUserDefaults.standardUserDefaults setBool:on forKey:kStartOnKey]; }
+
++ (NSString *)language {
+    NSString *lang = [NSUserDefaults.standardUserDefaults stringForKey:kLanguageKey];
+    return lang.length ? lang : @"auto";
+}
++ (void)setLanguage:(NSString *)lang {
+    [NSUserDefaults.standardUserDefaults setObject:(lang.length ? lang : @"auto") forKey:kLanguageKey];
+}
 
 + (NSString *)nameFor:(VGSubtitleQuality)q { return Models()[q][@"name"]; }
 + (NSInteger)megabytesFor:(VGSubtitleQuality)q { return [Models()[q][@"mb"] integerValue]; }
@@ -421,8 +430,11 @@ static BOOL IsNoiseTag(NSString *t) {
     if (!quiet) {
         struct whisper_full_params wp = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
         wp.print_progress = wp.print_special = wp.print_realtime = wp.print_timestamps = false;
-        wp.translate = true;            // whatever is spoken, write it in English
-        wp.language = "auto";           // find the spoken language on its own
+        NSString *lang = [VGSubtitles language];
+        wp.language = lang.UTF8String;
+        // Only translate to English when user explicitly chooses English.
+        // For zh / ja / ko / auto etc., keep original language transcription.
+        wp.translate = [lang isEqualToString:@"en"];
         wp.detect_language = false;
         wp.no_context = true;           // don't let one piece's guesses leak into the next
         wp.single_segment = false;
