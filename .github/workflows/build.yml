@@ -15,30 +15,6 @@ jobs:
         run: |
           brew install ldid dpkg make xz uv
 
-      # ---------- 修正文件名大小写不匹配 ----------
-      - name: Fix filename case sensitivity
-        run: |
-          # 把 Sources 下所有 .h 文件名改为与 .m 中 #import 引用一致的大小写
-          # 先处理已知的 VGConvert.h / vgconvert.h
-          if [ -f Sources/vgconvert.h ] && [ ! -f Sources/VGConvert.h ]; then
-            mv Sources/vgconvert.h Sources/VGConvert.h
-            echo "已重命名 Sources/vgconvert.h -> Sources/VGConvert.h"
-          fi
-          # 通用兜底：扫描 .m 文件中的 #import "XXX.h"，如果 XXX.h 在磁盘上存在但大小写不同，则修正
-          cd Sources
-          for m in *.m; do
-            [ -f "$m" ] || continue
-            grep -oE '#import "[^"]+\.h"' "$m" 2>/dev/null | sed 's/#import "//;s/"//' | while read -r h; do
-              [ -f "$h" ] && continue
-              actual=$(find . -maxdepth 1 -iname "$h" -type f | head -n 1)
-              if [ -n "$actual" ] && [ "$actual" != "./$h" ]; then
-                mv "$actual" "./$h"
-                echo "已重命名 $actual -> ./$h"
-              fi
-            done
-          done
-          cd ..
-
       # ---------- Theos ----------
       - name: Install Theos manually
         run: |
@@ -54,6 +30,83 @@ jobs:
         run: |
           sed -i '' "s#/root#$HOME#g" Makefile
           sed -i '' "s#/root#$HOME#g" assemble.py
+
+      # ---------- 诊断并修复 VGConvert 头文件 ----------
+      - name: Diagnose and repair VGConvert header
+        run: |
+          echo "=== Sources 下所有 .h 文件 ==="
+          ls -la Sources/*.h 2>/dev/null || echo "(无 .h 文件)"
+
+          echo ""
+          echo "=== Sources/vgconvert.h ==="
+          if [ -f Sources/vgconvert.h ]; then
+            echo "大小: $(wc -c < Sources/vgconvert.h) 字节"
+            echo "行数: $(wc -l < Sources/vgconvert.h)"
+            echo "--- 前 30 行 ---"
+            head -30 Sources/vgconvert.h
+          else
+            echo "文件不存在"
+          fi
+
+          echo ""
+          echo "=== Sources/VGConvert.h（精确大小写）==="
+          if [ -f Sources/VGConvert.h ]; then
+            echo "大小: $(wc -c < Sources/VGConvert.h) 字节"
+            echo "行数: $(wc -l < Sources/VGConvert.h)"
+            echo "--- 前 30 行 ---"
+            head -30 Sources/VGConvert.h
+          else
+            echo "文件不存在"
+          fi
+
+          echo ""
+          echo "=== VGConvert.m 前 10 行 ==="
+          head -10 Sources/VGConvert.m
+
+          echo ""
+          echo "=== 查找包含 @interface VGConvert 的文件 ==="
+          grep -rl "@interface VGConvert" Sources/ 2>/dev/null || echo "未找到"
+
+          echo ""
+          echo "=== 修复逻辑 ==="
+          VALID=0
+          for f in Sources/vgconvert.h Sources/VGConvert.h; do
+            if [ -f "$f" ] && [ -s "$f" ] && grep -q "@interface VGConvert" "$f"; then
+              VALID=1
+              echo "$f 内容有效"
+              # 确保文件名是 VGConvert.h（匹配 .m 中的 import）
+              if [ "$f" = "Sources/vgconvert.h" ] && [ ! -f Sources/VGConvert.h ]; then
+                cp "$f" Sources/VGConvert.h
+                echo "已复制 Sources/vgconvert.h -> Sources/VGConvert.h"
+              fi
+              break
+            fi
+          done
+
+          if [ "$VALID" -eq 0 ]; then
+            echo "本地头文件无效，尝试从上游 iamjhe08/VidGrab 下载..."
+            for path in "Sources/VGConvert.h" "Sources/vgconvert.h"; do
+              url="https://raw.githubusercontent.com/iamjhe08/VidGrab/main/$path"
+              echo "尝试: $url"
+              if curl -L --fail --silent -o /tmp/upstream.h "$url" 2>/dev/null; then
+                if [ -s /tmp/upstream.h ] && grep -q "@interface VGConvert" /tmp/upstream.h; then
+                  cp /tmp/upstream.h Sources/VGConvert.h
+                  echo "成功从 $url 恢复 VGConvert.h"
+                  VALID=1
+                  break
+                else
+                  echo "下载的文件无效（为空或缺少 @interface VGConvert）"
+                fi
+              fi
+            done
+          fi
+
+          if [ "$VALID" -eq 0 ]; then
+            echo "错误：无法获得有效的 VGConvert.h，请手动检查仓库中的该文件"
+            exit 1
+          fi
+
+          echo "VGConvert.h 已就绪"
 
       # ---------- Python.xcframework（锁定 3.14-b10）----------
       - name: Download Python.xcframework (3.14-b10)
@@ -122,9 +175,9 @@ jobs:
           mkdir -p $HOME/theos/toolchain/linux/iphone/bin
           ln -sf $(which ldid) $HOME/theos/toolchain/linux/iphone/bin/ldid
 
-      # ---------- 构建（已修正大小写，无需再传警告抑制标志）----------
+      # ---------- 构建（兜底抑制大小写警告）----------
       - name: Build app
-        run: make FINALPACKAGE=1
+        run: make FINALPACKAGE=1 ADDITIONAL_CFLAGS="-Wno-error=nonportable-include-path"
 
       - name: Assemble IPA
         run: python3 assemble.py
