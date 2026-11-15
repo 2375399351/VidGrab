@@ -20,24 +20,20 @@ jobs:
         run: |
           export THEOS=$HOME/theos
           git clone --recursive --depth 1 https://github.com/theos/theos.git $THEOS
-          # 新版 Theos 的 sdks 目录可能已存在，先清空再克隆
           rm -rf $THEOS/sdks
           git clone --depth 1 https://github.com/theos/sdks.git $THEOS/sdks
           echo "THEOS=$THEOS" >> $GITHUB_ENV
           echo "$THEOS/bin" >> $GITHUB_PATH
 
-      # ---------- Python.xcframework（固定 3.14 分支）----------
-      - name: Download Python.xcframework (3.14)
+      # ---------- Python.xcframework（锁定 3.14-b10，已验证可用）----------
+      - name: Download Python.xcframework (3.14-b10)
         run: |
-          PY_TAG="3.14-b14"
-          curl -L -o python-ios.tar.gz \
-            "https://github.com/beeware/Python-Apple-support/releases/download/${PY_TAG}/Python.xcframework-${PY_TAG}.tar.gz" || \
-          curl -L -o python-ios.tar.gz \
-            "https://github.com/beeware/Python-Apple-support/releases/download/${PY_TAG}/Python-3.14-iOS-support.b14.tar.gz"
+          PY_URL="https://github.com/beeware/Python-Apple-support/releases/download/3.14-b10/Python-3.14-iOS-support.b10.tar.gz"
+          curl -L --fail -o python-ios.tar.gz "$PY_URL"
           tar -xzf python-ios.tar.gz
           XC_SRC=$(find . -maxdepth 3 -name "Python.xcframework" -type d | head -n 1)
           if [ -z "$XC_SRC" ]; then
-            echo "未找到 Python.xcframework，请检查 BeeWare release 资产名称"
+            echo "未找到 Python.xcframework，请检查下载包内容"
             exit 1
           fi
           sudo mkdir -p /root/pyios
@@ -50,7 +46,7 @@ jobs:
         run: |
           FF_TAG="6.0"
           FF_URL="https://github.com/arthenica/ffmpeg-kit/releases/download/v${FF_TAG}.LTS/ffmpeg-kit-full-gpl-${FF_TAG}-ios-xcframework.zip"
-          curl -L -o ffmpeg-ios.zip "$FF_URL"
+          curl -L --fail -o ffmpeg-ios.zip "$FF_URL"
           unzip -q ffmpeg-ios.zip -d ffmpeg-ios-extracted
           SLICE_DIR=$(find ffmpeg-ios-extracted -type d -name "ios-arm64" | head -n 1)
           if [ -z "$SLICE_DIR" ]; then
