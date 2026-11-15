@@ -55,13 +55,11 @@ jobs:
 
           mkdir -p $HOME/ffmpeg-ios/include $HOME/ffmpeg-ios/lib
 
-          # 遍历每个 xcframework，提取 ios-arm64 切片下的头文件和静态库
           found_mp3lame=0
           while IFS= read -r -d '' xcf; do
             slice="$xcf/ios-arm64"
             [ -d "$slice" ] || continue
 
-            # 提取 Headers（可能在 slice/Headers 或 slice/*.framework/Headers）
             if [ -d "$slice/Headers" ]; then
               cp -R "$slice/Headers/." $HOME/ffmpeg-ios/include/
             elif find "$slice" -maxdepth 2 -name Headers -type d | head -n 1 | grep -q .; then
@@ -69,7 +67,6 @@ jobs:
               cp -R "$HDR_DIR/." $HOME/ffmpeg-ios/include/
             fi
 
-            # 提取静态库：优先找 slice 下的 .a，其次找 .framework 内的同名二进制
             find "$slice" -maxdepth 2 -name "*.a" -exec cp {} $HOME/ffmpeg-ios/lib/ \;
             for fw in "$slice"/*.framework; do
               [ -d "$fw" ] || continue
@@ -101,9 +98,9 @@ jobs:
           mkdir -p $HOME/theos/toolchain/linux/iphone/bin
           ln -sf $(which ldid) $HOME/theos/toolchain/linux/iphone/bin/ldid
 
-      # ---------- 构建 ----------
+      # ---------- 构建（修复文件名大小写警告）----------
       - name: Build app
-        run: make FINALPACKAGE=1
+        run: make FINALPACKAGE=1 ADDITIONAL_CFLAGS="-Wno-error=nonportable-include-path"
 
       - name: Assemble IPA
         run: python3 assemble.py
