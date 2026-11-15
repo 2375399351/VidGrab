@@ -9,7 +9,7 @@ extern NSString *const VGSubtitleModelDidChange;
 
 typedef NS_ENUM(NSInteger, VGSubtitleQuality) { VGSubtitleFast, VGSubtitleBalanced, VGSubtitleBest };
 
-/// Auto English subtitles made on the phone itself (no account, nothing uploaded).
+/// Auto subtitles made on the phone itself (no account, nothing uploaded).
 /// Off until switched on in Settings; the speech model is downloaded once, only when asked for.
 @interface VGSubtitles : NSObject
 
@@ -19,7 +19,10 @@ typedef NS_ENUM(NSInteger, VGSubtitleQuality) { VGSubtitleFast, VGSubtitleBalanc
 /// Whether subtitles were left on in the last video (so the next one starts the same way).
 @property (class, nonatomic) BOOL startOn;
 
-/// How the lines look on the picture (Settings > Auto English subtitles).
+/// Subtitle language code: @"auto", @"zh", @"en", @"ja", @"ko", @"yue", etc.
+@property (class, nonatomic, copy) NSString *language;
+
+/// How the lines look on the picture (Settings > Auto subtitles).
 @property (class, nonatomic) NSInteger textSize;        // 0 small, 1 medium (default), 2 large, 3 extra large
 @property (class, nonatomic) NSInteger textColor;       // 0 white (default), 1 yellow, 2 cyan, 3 green
 @property (class, nonatomic) NSInteger backgroundStyle; // 0 dark (default), 1 solid black, 2 none, 3 light
@@ -47,8 +50,8 @@ typedef NS_ENUM(NSInteger, VGSubtitleQuality) { VGSubtitleFast, VGSubtitleBalanc
 
 @end
 
-/// Listens to a video's sound ahead of the playhead, in 30 second pieces, and turns whatever language
-/// is spoken into English text with times, so the lines show up in step with the picture.
+/// Listens to a video's sound ahead of the playhead, in 30 second pieces, and turns speech
+/// into text with times, so the lines show up in step with the picture.
 @interface VGSubtitleEngine : NSObject
 
 /// Something to show in place of subtitles while it works ("Making subtitles…"), or nil.
@@ -57,7 +60,7 @@ typedef NS_ENUM(NSInteger, VGSubtitleQuality) { VGSubtitleFast, VGSubtitleBalanc
 @property (nonatomic, copy, nullable) void (^onChange)(void);
 
 - (instancetype)initWithURL:(NSURL *)url key:(NSString *)key quality:(VGSubtitleQuality)quality;
-/// For a video that plays from the internet: listens through the stream\'s own sound track. No lines are saved for later.
+/// For a video that plays from the internet: listens through the stream's own sound track. No lines are saved for later.
 - (instancetype)initWithAsset:(AVAsset *)asset quality:(VGSubtitleQuality)quality;
 /// Set when the sound could not be read (some live-style streams); the player says so.
 @property (nonatomic, copy) void (^onUnreadable)(void);
