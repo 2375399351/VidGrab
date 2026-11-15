@@ -20,6 +20,8 @@ jobs:
         run: |
           export THEOS=$HOME/theos
           git clone --recursive --depth 1 https://github.com/theos/theos.git $THEOS
+          # 新版 Theos 的 sdks 目录可能已存在，先清空再克隆
+          rm -rf $THEOS/sdks
           git clone --depth 1 https://github.com/theos/sdks.git $THEOS/sdks
           echo "THEOS=$THEOS" >> $GITHUB_ENV
           echo "$THEOS/bin" >> $GITHUB_PATH
@@ -27,14 +29,12 @@ jobs:
       # ---------- Python.xcframework（固定 3.14 分支）----------
       - name: Download Python.xcframework (3.14)
         run: |
-          # BeeWare Python-Apple-support 的 3.14 最新 release
           PY_TAG="3.14-b14"
           curl -L -o python-ios.tar.gz \
             "https://github.com/beeware/Python-Apple-support/releases/download/${PY_TAG}/Python.xcframework-${PY_TAG}.tar.gz" || \
           curl -L -o python-ios.tar.gz \
             "https://github.com/beeware/Python-Apple-support/releases/download/${PY_TAG}/Python-3.14-iOS-support.b14.tar.gz"
           tar -xzf python-ios.tar.gz
-          # 找到解压出来的 Python.xcframework，放到 assemble.py 硬编码的路径
           XC_SRC=$(find . -maxdepth 3 -name "Python.xcframework" -type d | head -n 1)
           if [ -z "$XC_SRC" ]; then
             echo "未找到 Python.xcframework，请检查 BeeWare release 资产名称"
@@ -52,7 +52,6 @@ jobs:
           FF_URL="https://github.com/arthenica/ffmpeg-kit/releases/download/v${FF_TAG}.LTS/ffmpeg-kit-full-gpl-${FF_TAG}-ios-xcframework.zip"
           curl -L -o ffmpeg-ios.zip "$FF_URL"
           unzip -q ffmpeg-ios.zip -d ffmpeg-ios-extracted
-          # ffmpeg-kit 的 xcframework 里，ios-arm64 切片包含 Headers/ 和 lib/
           SLICE_DIR=$(find ffmpeg-ios-extracted -type d -name "ios-arm64" | head -n 1)
           if [ -z "$SLICE_DIR" ]; then
             echo "未找到 ios-arm64 切片，请检查 ffmpeg-kit zip 结构"
@@ -67,13 +66,11 @@ jobs:
           ls /root/ffmpeg-ios/include | head
           ls /root/ffmpeg-ios/lib | head
 
-      # ---------- app_packages（assemble.py 期望存在）----------
+      # ---------- app_packages ----------
       - name: Prepare app_packages
         run: |
           sudo mkdir -p /root/app_packages
           sudo chown -R $(id -u):$(id -g) /root/app_packages
-          # 仓库没有 requirements.txt，assemble.py 会自行从 Resources/yt-dlp 解压 yt-dlp
-          # 这里留空目录即可
 
       # ---------- 修复 assemble.py 中硬编码的 Linux ldid 路径 ----------
       - name: Link ldid to expected path
