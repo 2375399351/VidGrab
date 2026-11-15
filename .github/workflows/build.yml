@@ -25,7 +25,14 @@ jobs:
           echo "THEOS=$THEOS" >> $GITHUB_ENV
           echo "$THEOS/bin" >> $GITHUB_PATH
 
-      # ---------- Python.xcframework（锁定 3.14-b10，已验证可用）----------
+      # ---------- 将源码中硬编码的 /root 路径替换为 $HOME ----------
+      - name: Patch hardcoded /root paths
+        run: |
+          # 用 $HOME 的实际绝对路径替换 Makefile 和 assemble.py 中的 /root
+          sed -i '' "s#/root#$HOME#g" Makefile
+          sed -i '' "s#/root#$HOME#g" assemble.py
+
+      # ---------- Python.xcframework（锁定 3.14-b10）----------
       - name: Download Python.xcframework (3.14-b10)
         run: |
           PY_URL="https://github.com/beeware/Python-Apple-support/releases/download/3.14-b10/Python-3.14-iOS-support.b10.tar.gz"
@@ -33,13 +40,12 @@ jobs:
           tar -xzf python-ios.tar.gz
           XC_SRC=$(find . -maxdepth 3 -name "Python.xcframework" -type d | head -n 1)
           if [ -z "$XC_SRC" ]; then
-            echo "未找到 Python.xcframework，请检查下载包内容"
+            echo "未找到 Python.xcframework"
             exit 1
           fi
-          sudo mkdir -p /root/pyios
-          sudo cp -R "$XC_SRC" /root/pyios/Python.xcframework
-          sudo chown -R $(id -u):$(id -g) /root/pyios
-          ls /root/pyios/Python.xcframework
+          mkdir -p $HOME/pyios
+          cp -R "$XC_SRC" $HOME/pyios/Python.xcframework
+          ls $HOME/pyios/Python.xcframework
 
       # ---------- FFmpeg 静态库（full-gpl，含 lame）----------
       - name: Download FFmpeg iOS static libs (full-gpl)
@@ -50,29 +56,27 @@ jobs:
           unzip -q ffmpeg-ios.zip -d ffmpeg-ios-extracted
           SLICE_DIR=$(find ffmpeg-ios-extracted -type d -name "ios-arm64" | head -n 1)
           if [ -z "$SLICE_DIR" ]; then
-            echo "未找到 ios-arm64 切片，请检查 ffmpeg-kit zip 结构"
+            echo "未找到 ios-arm64 切片"
             exit 1
           fi
-          sudo mkdir -p /root/ffmpeg-ios
-          sudo cp -R "$SLICE_DIR/Headers" /root/ffmpeg-ios/include 2>/dev/null || \
-            sudo cp -R "$SLICE_DIR/include" /root/ffmpeg-ios/include
-          sudo cp -R "$SLICE_DIR/lib" /root/ffmpeg-ios/lib 2>/dev/null || \
-            sudo mkdir -p /root/ffmpeg-ios/lib && sudo find "$SLICE_DIR" -name "*.a" -exec cp {} /root/ffmpeg-ios/lib/ \;
-          sudo chown -R $(id -u):$(id -g) /root/ffmpeg-ios
-          ls /root/ffmpeg-ios/include | head
-          ls /root/ffmpeg-ios/lib | head
+          mkdir -p $HOME/ffmpeg-ios
+          cp -R "$SLICE_DIR/Headers" $HOME/ffmpeg-ios/include 2>/dev/null || \
+            cp -R "$SLICE_DIR/include" $HOME/ffmpeg-ios/include
+          cp -R "$SLICE_DIR/lib" $HOME/ffmpeg-ios/lib 2>/dev/null || \
+            mkdir -p $HOME/ffmpeg-ios/lib && find "$SLICE_DIR" -name "*.a" -exec cp {} $HOME/ffmpeg-ios/lib/ \;
+          ls $HOME/ffmpeg-ios/include | head
+          ls $HOME/ffmpeg-ios/lib | head
 
       # ---------- app_packages ----------
       - name: Prepare app_packages
         run: |
-          sudo mkdir -p /root/app_packages
-          sudo chown -R $(id -u):$(id -g) /root/app_packages
+          mkdir -p $HOME/app_packages
 
-      # ---------- 修复 assemble.py 中硬编码的 Linux ldid 路径 ----------
+      # ---------- 修复 assemble.py 中硬编码的 ldid 路径 ----------
       - name: Link ldid to expected path
         run: |
-          sudo mkdir -p /root/theos/toolchain/linux/iphone/bin
-          sudo ln -sf $(which ldid) /root/theos/toolchain/linux/iphone/bin/ldid
+          mkdir -p $HOME/theos/toolchain/linux/iphone/bin
+          ln -sf $(which ldid) $HOME/theos/toolchain/linux/iphone/bin/ldid
 
       # ---------- 构建 ----------
       - name: Build app
@@ -86,7 +90,7 @@ jobs:
         run: |
           IPA_PATH=$(find . -maxdepth 2 -name "VidGrab.ipa" -type f | head -n 1)
           if [ -z "$IPA_PATH" ]; then
-            echo "未找到 VidGrab.ipa，请检查 assemble.py 输出"
+            echo "未找到 VidGrab.ipa"
             exit 1
           fi
           echo "IPA_PATH=$IPA_PATH" >> $GITHUB_OUTPUT
