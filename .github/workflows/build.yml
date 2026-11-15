@@ -1,4 +1,3 @@
-# Put this file at: .github/workflows/build.yml
 name: Build VidGrab IPA
 
 on:
@@ -21,6 +20,7 @@ jobs:
   build:
     runs-on: macos-latest
     timeout-minutes: 180
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,53 +28,57 @@ jobs:
       - name: Install tools
         run: |
           brew install make ldid dpkg wget gnu-tar || true
-          # ensure gmake if needed
           echo "PATH=$(brew --prefix make)/libexec/gnubin:$PATH" >> $GITHUB_ENV
 
-      - name: Setup Theos
-        uses: Randomblock1/theos-action@v1
-        with:
-          theos-dir: theos
-          # iOS 16.5 SDK is what Makefile asks for; action pulls theos/sdks
-          theos-sdks: https://github.com/theos/sdks
-
-      - name: Verify Theos SDK
+      - name: Setup Theos (manual)
         run: |
-          echo "THEOS=$THEOS"
-          ls "$THEOS/sdks" || true
-          # Prefer 16.5; fall back to whatever is available
-          if [ ! -d "$THEOS/sdks/iPhoneOS16.5.sdk" ]; then
-            echo "iPhoneOS16.5.sdk missing; available:"
-            ls "$THEOS/sdks" || true
-            # Try to use newest available by patching Makefile target later
+          set -e
+          git clone --recursive https://github.com/theos/theos.git "$THEOS"
+          mkdir -p "$THEOS/sdks"
+          curl -L --retry 3 -o /tmp/sdks.tar.gz \
+            https://github.com/theos/sdks/archive/refs/heads/master.tar.gz
+          mkdir -p /tmp/sdks-extract
+          tar -xzf /tmp/sdks.tar.gz -C /tmp/sdks-extract
+          find /tmp/sdks-extract -maxdepth 2 -type d -name '*.sdk' -exec cp -a {} "$THEOS/sdks/" \;
+          echo "SDK list:"
+          ls -la "$THEOS/sdks"
+          echo "THEOS=$THEOS" >> $GITHUB_ENV
+
+      - name: Ensure ldid
+        run: |
+          if ! command -v ldid >/dev/null 2>&1; then
+            if [ -x "$THEOS/toolchain/linux/iphone/bin/ldid" ]; then
+              echo "$THEOS/toolchain/linux/iphone/bin" >> $GITHUB_PATH
+            fi
           fi
+          which ldid || echo "WARNING: ldid not found"
 
       - name: Cache deps
         id: cache-deps
         uses: actions/cache@v4
         with:
           path: deps
-          key: vidgrab-deps-v3-${{ runner.os }}
+          key: vidgrab-deps-v4-${{ runner.os }}
 
-      - name: Download Python.xcframework (BeeWare 3.14 iOS support)
+      - name: Download Python.xcframework (BeeWare 3.14 iOS)
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
+          set -e
           mkdir -p "$DEPS"
           cd "$DEPS"
-          # BeeWare prebuilt iOS support package
           URL="https://github.com/beeware/Python-Apple-support/releases/download/3.14-b14/Python-3.14-iOS-support.b14.tar.gz"
           echo "Downloading $URL"
           curl -L --retry 3 -o py.tgz "$URL"
           mkdir -p pyextract
           tar -xzf py.tgz -C pyextract
-          # Layout varies; find Python.xcframework
           FOUND=$(find pyextract -type d -name 'Python.xcframework' | head -1)
           if [ -z "$FOUND" ]; then
-            echo "Python.xcframework not found in archive"; find pyextract | head -50; exit 1
+            echo "Python.xcframework not found"
+            find pyextract | head -80
+            exit 1
           fi
           rm -rf Python.xcframework
           mv "$FOUND" Python.xcframework
-          # vendor path expected by Makefile
           mkdir -p "$GITHUB_WORKSPACE/vendor/ios-arm64"
           if [ -d Python.xcframework/ios-arm64/Python.framework ]; then
             cp -a Python.xcframework/ios-arm64/Python.framework "$GITHUB_WORKSPACE/vendor/ios-arm64/"
@@ -82,7 +86,7 @@ jobs:
           ls -la Python.xcframework
           ls -la Python.xcframework/ios-arm64 || true
 
-      - name: Ensure vendor Python.framework (cache hit path)
+      - name: Ensure vendor Python.framework
         run: |
           mkdir -p vendor/ios-arm64
           if [ ! -d vendor/ios-arm64/Python.framework ]; then
@@ -90,65 +94,55 @@ jobs:
               cp -a "$PYTHON_XCFRAMEWORK/ios-arm64/Python.framework" vendor/ios-arm64/
             else
               echo "WARNING: vendor/ios-arm64/Python.framework still missing"
+              find deps -maxdepth 4 -type d -name 'Python.framework' || true
             fi
           fi
+          ls -la vendor/ios-arm64 || true
 
-      - name: Build or restore FFmpeg iOS static libs
+      - name: Prepare FFmpeg paths (placeholder if no cache)
+        run: |
+          mkdir -p "$FFMPEG_IOS/include" "$FFMPEG_IOS/lib"
+          # 若没有预编译库，后续 make 会失败；先保证目录存在
+          ls -la "$FFMPEG_IOS" || true
+
+      - name: Try build FFmpeg iOS static libs
         if: steps.cache-deps.outputs.cache-hit != 'true'
+        continue-on-error: true
         run: |
           set -e
-          mkdir -p "$FFMPEG_IOS/lib" "$FFMPEG_IOS/include"
-          # Try a pragmatic minimal approach: build only what Makefile links
-          # This step is the most likely to fail on first run.
+          mkdir -p "$FFMPEG_IOS/lib" "$FFMPEG_IOS/include/lame"
+          if [ ! -d "$DEPS/ffmpeg-src" ]; then
+            git clone --depth 1 --branch n7.1.1 https://github.com/FFmpeg/FFmpeg.git "$DEPS/ffmpeg-src" \
+              || git clone --depth 1 --branch release/7.1 https://github.com/FFmpeg/FFmpeg.git "$DEPS/ffmpeg-src"
+          fi
+          brew install lame || true
+          if [ -f /opt/homebrew/include/lame/lame.h ]; then
+            cp /opt/homebrew/include/lame/lame.h "$FFMPEG_IOS/include/lame/" || true
+          elif [ -f /usr/local/include/lame/lame.h ]; then
+            cp /usr/local/include/lame/lame.h "$FFMPEG_IOS/include/lame/" || true
+          fi
+          # 没有真正的 iOS 版 libmp3lame.a 时，这一步多半会失败，允许 continue
           if [ -f tools/build_ffmpeg_ios.sh ]; then
-            echo "FFmpeg build script present — attempting (may take long / fail)"
-            # Script expects /root paths; we override via env if possible
-            export THEOS="$THEOS"
-            export FFMPEG_DEST="$FFMPEG_IOS"
-            # Clone FFmpeg source
-            if [ ! -d "$DEPS/ffmpeg-src" ]; then
-              git clone --depth 1 --branch n7.1.1 https://github.com/FFmpeg/FFmpeg.git "$DEPS/ffmpeg-src" || \
-              git clone --depth 1 --branch release/7.1 https://github.com/FFmpeg/FFmpeg.git "$DEPS/ffmpeg-src"
-            fi
-            export FFMPEG_SRC="$DEPS/ffmpeg-src"
-            # LAME is required by the script — try brew + copy headers (device build needs cross-compile)
-            brew install lame || true
-            # Create placeholder LAME so script structure works; real cross-build of LAME is non-trivial
-            mkdir -p "$FFMPEG_IOS/include/lame" "$FFMPEG_IOS/lib"
-            # If system lame headers exist, copy for host — still may fail for arm64-apple-ios
-            if [ -f /opt/homebrew/include/lame/lame.h ]; then
-              cp /opt/homebrew/include/lame/lame.h "$FFMPEG_IOS/include/lame/" || true
-            fi
-            # Touch empty lib so path exists (link will fail later if not real)
-            if [ ! -f "$FFMPEG_IOS/lib/libmp3lame.a" ]; then
-              echo "WARNING: libmp3lame.a missing — FFmpeg step may fail"
-              # Create a stub to allow diagnosing further steps; remove for production
-              echo '!<arch>' > "$FFMPEG_IOS/lib/libmp3lame.a"
-            fi
-            chmod +x tools/build_ffmpeg_ios.sh || true
-            # Patch script destinations on the fly
-            sed "s|/root/ffmpeg-ios|$FFMPEG_IOS|g; s|/root/ffmpeg-src|$DEPS/ffmpeg-src|g; s|/root/theos|$THEOS|g" \
+            sed \
+              -e "s|/root/ffmpeg-ios|$FFMPEG_IOS|g" \
+              -e "s|/root/ffmpeg-src|$DEPS/ffmpeg-src|g" \
+              -e "s|/root/theos|$THEOS|g" \
               tools/build_ffmpeg_ios.sh > /tmp/build_ffmpeg_ios.sh
             chmod +x /tmp/build_ffmpeg_ios.sh
-            /tmp/build_ffmpeg_ios.sh || echo "FFmpeg build failed — continuing to show later errors"
-          else
-            echo "No tools/build_ffmpeg_ios.sh"
+            /tmp/build_ffmpeg_ios.sh || echo "FFmpeg build failed (expected on first runs)"
           fi
           ls -la "$FFMPEG_IOS/lib" || true
 
-      - name: Prepare app_packages (yt-dlp pure Python)
+      - name: Prepare app_packages (yt-dlp)
         run: |
           set -e
           mkdir -p "$APP_PACKAGES"
           python3 -m pip install -U pip
-          # Download yt-dlp as zip from GitHub for extract step
           curl -L --retry 3 -o "$YTDLP_ZIP" \
             "https://github.com/yt-dlp/yt-dlp/archive/refs/heads/master.zip" || true
-          # Install pure-python deps into app_packages (best-effort)
           python3 -m pip install --target "$APP_PACKAGES" \
-            yt-dlp mutagen brotli certifi pycryptodomex requests urllib3 \
-            || python3 -m pip install --target "$APP_PACKAGES" yt-dlp || true
-          # Also extract yt_dlp from zip if present
+            yt-dlp mutagen brotli certifi requests urllib3 || \
+            python3 -m pip install --target "$APP_PACKAGES" yt-dlp || true
           if [ -f "$YTDLP_ZIP" ]; then
             TMP=$(mktemp -d)
             unzip -q "$YTDLP_ZIP" -d "$TMP" || true
@@ -162,27 +156,27 @@ jobs:
 
       - name: Patch Makefile paths for CI
         run: |
-          # Point FFmpeg and keep PYFW_DIR
           cp Makefile Makefile.orig
+          # macOS sed 需要备份后缀写法
           sed -i.bak \
-            -e "s|-I/root/ffmpeg-ios/include|-I$FFMPEG_IOS/include|g" \
-            -e "s|-L/root/ffmpeg-ios/lib|-L$FFMPEG_IOS/lib|g" \
+            -e "s|-I/root/ffmpeg-ios/include|-I${FFMPEG_IOS}/include|g" \
+            -e "s|-L/root/ffmpeg-ios/lib|-L${FFMPEG_IOS}/lib|g" \
             Makefile
-          # If 16.5 SDK missing, try 16.2 or 15.0
           if [ ! -d "$THEOS/sdks/iPhoneOS16.5.sdk" ]; then
-            SDK=$(ls -1 "$THEOS/sdks" | grep iPhoneOS | sort -V | tail -1 | sed 's/iPhoneOS//;s/.sdk//')
-            echo "Using SDK $SDK"
+            SDK=$(ls -1 "$THEOS/sdks" | grep 'iPhoneOS' | sort -V | tail -1 | sed 's/iPhoneOS//;s/.sdk//')
+            echo "Using SDK $SDK instead of 16.5"
             sed -i.bak "s|iphone:clang:16.5:15.0|iphone:clang:${SDK}:15.0|" Makefile
           fi
-          head -20 Makefile
+head -25 Makefile
 
       - name: Compile with Theos
+        id: compile
+        continue-on-error: true
         run: |
           export THEOS
           export PYFW_DIR="$GITHUB_WORKSPACE/vendor/ios-arm64"
           make clean || true
           make FINALPACKAGE=1 2>&1 | tee build.log
-        continue-on-error: true
 
       - name: Show compile result
         run: |
@@ -190,30 +184,29 @@ jobs:
           ls -la .theos/obj/VidGrab.app 2>/dev/null || true
           if [ ! -d .theos/obj/VidGrab.app ]; then
             echo "==== build.log (tail) ===="
-            tail -80 build.log || true
-            echo "Compile did not produce VidGrab.app — assemble will fail"
+            tail -100 build.log || true
           fi
 
       - name: Assemble IPA
+        continue-on-error: true
         env:
           PYTHON_XCFRAMEWORK: ${{ env.PYTHON_XCFRAMEWORK }}
           APP_PACKAGES: ${{ env.APP_PACKAGES }}
-          YTDLP_ZIP: ${{ env.YTDL_ZIP }}
+          YTDLP_ZIP: ${{ env.YTDLP_ZIP }}
           LDID: ldid
         run: |
-          # Use CI assemble script (copy next to project root)
-          cp .github/workflows/assemble_ci.py ./assemble_ci.py 2>/dev/null || \
-          cp github_actions/assemble_ci.py ./assemble_ci.py 2>/dev/null || true
-          if [ ! -f assemble_ci.py ]; then
-            echo "assemble_ci.py missing — put it at repo root or .github/workflows/"
+          if [ -f assemble_ci.py ]; then
+            python3 assemble_ci.py 2>&1 | tee assemble.log
+          elif [ -f .github/workflows/assemble_ci.py ]; then
+            python3 .github/workflows/assemble_ci.py 2>&1 | tee assemble.log
+          else
+            echo "assemble_ci.py not found in repo root or .github/workflows/"
             exit 1
           fi
-          python3 assemble_ci.py 2>&1 | tee assemble.log
-        continue-on-error: true
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
         if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: vidgrab-build
           path: |
