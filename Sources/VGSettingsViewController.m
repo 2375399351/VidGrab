@@ -129,7 +129,7 @@ typedef NS_ENUM(NSInteger, VGSection) { VGSectionLanguage, VGSectionEngine, VGSe
         case VGSectionDownloads: return 7;
         case VGSectionFloat: return 4;
         case VGSectionGestures: return 6;
-        case VGSectionSubtitles: return 6;
+        case VGSectionSubtitles: return 7;
         case VGSectionAudio: return 3;
         case VGSectionInterface: return 2;
         case VGSectionLanguage: return 1;
@@ -208,7 +208,7 @@ typedef NS_ENUM(NSInteger, VGSection) { VGSectionLanguage, VGSectionEngine, VGSe
     if (section == VGSectionGestures)
         return @"In the video player, swipe up or down on one half of the screen to change brightness and on the other half to change volume. Brightness/Volume gesture turns both on or off and Brightness side picks which half does what; they work when the phone is sideways. Swipe to seek jumps forward or back as you swipe sideways, in either direction of the phone, and the video follows your finger frame by frame. Seek distance is how far one swipe across the whole screen jumps. Progress line shows a thin bar along the bottom edge while the buttons are hidden. Brightness goes back to normal when you close the player. Swipes that start on the player's own buttons still work as usual.";
     if (section == VGSectionSubtitles)
-        return @"Auto subtitles listen to the video on your phone and write what is said in English, whatever the language. Nothing is uploaded and no account is needed. The speech model downloads once, only when you turn this on. It uses extra battery and warms the phone while it works, and older phones can fall behind the video, so Fast is the safe choice. Accuracy drops with music, background noise and rare languages. In the player, turn it on from the CC button.";
+        return @"Auto subtitles listen to the video on your phone and write what is said. You can choose the language in Subtitle language (Auto detect, Chinese, English, etc.). Nothing is uploaded and no account is needed. The speech model downloads once, only when you turn this on. It uses extra battery and warms the phone while it works, and older phones can fall behind the video, so Fast is the safe choice. Accuracy drops with music, background noise and rare languages. In the player, turn it on from the CC button.";
     if (section == VGSectionInterface)
         return @"iPad layout swaps the bottom tab bar for a list on the left side, with the page next to it, and only shows on iPad. Haptic feedback gives a small tap on the phone when you switch tabs, flip a switch, or a download finishes.";
     if (section == VGSectionAudio)
@@ -483,7 +483,7 @@ typedef NS_ENUM(NSInteger, VGSection) { VGSectionLanguage, VGSectionEngine, VGSe
     if (ip.section == VGSectionSubtitles) {
         BOOL on = VGSubtitles.enabled;
         if (ip.row == 0) {
-            UITableViewCell *c = [self cellWithTitle:@"Auto English subtitles" value:nil icon:@"captions.bubble" tint:nil];
+            UITableViewCell *c = [self cellWithTitle:@"Auto subtitles" value:nil icon:@"captions.bubble" tint:nil];
             UISwitch *sw = [UISwitch new];
             sw.on = on;
             sw.onTintColor = VGAccent;
@@ -493,20 +493,35 @@ typedef NS_ENUM(NSInteger, VGSection) { VGSectionLanguage, VGSectionEngine, VGSe
             return c;
         }
         if (ip.row == 1) {
+            NSString *lang = VGSubtitles.language;
+            NSString *name = @"Auto detect";
+            if ([lang isEqualToString:@"zh"]) name = @"中文";
+            else if ([lang isEqualToString:@"en"]) name = @"English";
+            else if ([lang isEqualToString:@"ja"]) name = @"日本語";
+            else if ([lang isEqualToString:@"ko"]) name = @"한국어";
+            else if ([lang isEqualToString:@"yue"]) name = @"粤语";
+            else if (![lang isEqualToString:@"auto"]) name = lang;
+            UITableViewCell *c = [self cellWithTitle:@"Subtitle language" value:name icon:@"globe" tint:on ? nil : VGTertiary];
+            c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            if (!on) c.selectionStyle = UITableViewCellSelectionStyleNone;
+            return c;
+        }
+        if (ip.row == 2) {
             UITableViewCell *c = [self cellWithTitle:@"Quality" value:[VGSubtitles nameFor:VGSubtitles.quality] icon:@"slider.horizontal.3" tint:on ? nil : VGTertiary];
             c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             if (!on) c.selectionStyle = UITableViewCellSelectionStyleNone;
             return c;
         }
-        if (ip.row >= 3) {
+        if (ip.row >= 4) {
             NSArray *titles = @[@"Text size", @"Text color", @"Background"];
             NSArray *icons = @[@"textformat.size", @"paintpalette", @"rectangle.fill"];
-            NSInteger idx = ip.row - 3;
+            NSInteger idx = ip.row - 4;
             NSString *val = idx == 0 ? VGSubtitles.sizeNames[VGSubtitles.textSize] : idx == 1 ? VGSubtitles.colorNames[VGSubtitles.textColor] : VGSubtitles.backgroundNames[VGSubtitles.backgroundStyle];
             UITableViewCell *c = [self cellWithTitle:titles[idx] value:val icon:icons[idx] tint:nil];
             c.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             return c;
         }
+        // row == 3 : Speech model
         VGSubtitleQuality q = VGSubtitles.quality;
         NSString *state;
         if (VGSubtitles.downloading) state = [NSString stringWithFormat:@"Downloading %d%%", (int)round(VGSubtitles.downloadProgress * 100)];
@@ -578,9 +593,10 @@ typedef NS_ENUM(NSInteger, VGSection) { VGSectionLanguage, VGSectionEngine, VGSe
     else if (ip.section == VGSectionFloat && row == 2) [self testSound:[tv cellForRowAtIndexPath:ip]];
     else if (ip.section == VGSectionGestures && row == 2) [self chooseBrightnessSide:[tv cellForRowAtIndexPath:ip]];
     else if (ip.section == VGSectionGestures && row == 3) [self chooseSeekDistance:[tv cellForRowAtIndexPath:ip]];
-    else if (ip.section == VGSectionSubtitles && row == 1 && VGSubtitles.enabled) [self chooseSubtitleQuality:[tv cellForRowAtIndexPath:ip]];
-    else if (ip.section == VGSectionSubtitles && row == 2 && VGSubtitles.enabled) [self tapSpeechModel:[tv cellForRowAtIndexPath:ip]];
-    else if (ip.section == VGSectionSubtitles && row >= 3) [self chooseSubtitleStyle:row - 3 from:[tv cellForRowAtIndexPath:ip]];
+    else if (ip.section == VGSectionSubtitles && row == 1 && VGSubtitles.enabled) [self chooseSubtitleLanguage:[tv cellForRowAtIndexPath:ip]];
+    else if (ip.section == VGSectionSubtitles && row == 2 && VGSubtitles.enabled) [self chooseSubtitleQuality:[tv cellForRowAtIndexPath:ip]];
+    else if (ip.section == VGSectionSubtitles && row == 3 && VGSubtitles.enabled) [self tapSpeechModel:[tv cellForRowAtIndexPath:ip]];
+    else if (ip.section == VGSectionSubtitles && row >= 4) [self chooseSubtitleStyle:row - 4 from:[tv cellForRowAtIndexPath:ip]];
     else if (ip.section == VGSectionAudio && row == 1) [self chooseCrossfade:[tv cellForRowAtIndexPath:ip]];
     else if (ip.section == VGSectionBackup && row == 0) [VGSettingsBackup exportFrom:self];
     else if (ip.section == VGSectionBackup && row == 1) [VGSettingsBackup importFrom:self completion:^{ [tv reloadData]; }];
@@ -713,6 +729,31 @@ typedef NS_ENUM(NSInteger, VGSection) { VGSectionLanguage, VGSectionEngine, VGSe
         [self reloadSubtitleSection];
     }]];
     [self presentViewController:a animated:YES completion:nil];
+}
+
+
+- (void)chooseSubtitleLanguage:(UITableViewCell *)cell {
+    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"Subtitle language" message:nil preferredStyle:UIAlertControllerStyleActionSheet];
+    NSArray *items = @[
+        @[@"Auto detect", @"auto"],
+        @[@"中文", @"zh"],
+        @[@"English", @"en"],
+        @[@"日本語", @"ja"],
+        @[@"한국어", @"ko"],
+        @[@"粤语", @"yue"],
+    ];
+    for (NSArray *item in items) {
+        [ac addAction:[UIAlertAction actionWithTitle:item[0] style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+            VGSubtitles.language = item[1];
+            [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:VGSectionSubtitles] withRowAnimation:UITableViewRowAnimationNone];
+        }]];
+    }
+    [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    if (ac.popoverPresentationController) {
+        ac.popoverPresentationController.sourceView = cell;
+        ac.popoverPresentationController.sourceRect = cell.bounds;
+    }
+    [self presentViewController:ac animated:YES completion:nil];
 }
 
 - (void)chooseSubtitleQuality:(UIView *)from {
